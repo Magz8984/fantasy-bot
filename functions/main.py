@@ -5,6 +5,18 @@ from fastapi import FastAPI
 from firebase_functions import https_fn
 from fastapi.middleware.cors import CORSMiddleware
 from firebase_functions.options import set_global_options
+
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import db
+
+# Fetch the service account key JSON file path
+cred = credentials.Certificate("../serviceAccount.json")
+
+firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://fantasy-f1-3a499-default-rtdb.firebaseio.com'
+})
+
 # For cost control, you can set the maximum number of containers that can be
 # running at the same time. This helps mitigate the impact of unexpected
 # traffic spikes by instead downgrading performance. This limit is a per-function
@@ -58,6 +70,12 @@ class Player:
     element_type: int
     element_type_name: str
     f_e_r: str
+
+
+@dataclass
+class AddPlayerDTO:
+    player_id: int  # The ID of the player to add
+    in_bench: bool = False  # Whether the player is in the bench or not
 
 
 @dataclass
@@ -121,8 +139,8 @@ def sanitizePlayers(players: list[Player], teams: list[Team], player_types: list
     return players
 
 
-@app.get("/api/player_ranking")
-def player_ranking():
+# Fetch players from the Fantasy Premier League API and return a list of Player objects
+def getPlayers():
     request = requests.get(
         "https://fantasy.premierleague.com/api/bootstrap-static/")
 
@@ -144,12 +162,98 @@ def player_ranking():
 
     # Sanitize players by adding team_name and converting now_cost to float
     players = sanitizePlayers(players, teams, player_types)
+    
+    return players;
+
+
+@app.get("/api/player_ranking")
+def player_ranking():
+    
+    # Fetch players from the Fantasy Premier League API and return a list of Player objects
+    players = getPlayers()
 
     # Sort players based on f_e_r in descending order
     players.sort(key=lambda player: player.f_e_r, reverse=True)
 
     return {"message": players}
 # 1. Used by Firebase in Production
+
+
+@app.get("/squad")
+def get_squad():
+    ref = db.reference('squad')
+    squad_data = ref.get()
+    
+    if(squad_data is None):
+        return {"message": []}
+
+    players = getPlayers();
+    
+    # Get player IDs from the squad data
+    squad_player_ids = [player['player_id'] for player in squad_data]
+    
+    # Get players from the API that are in the squad
+    squad_players = [player for player in players if player.id in squad_player_ids]
+    
+    return squad_players
+
+
+@app.post("/add_player")
+def add_player(player_data: AddPlayerDTO):
+    ref = db.reference('squad')
+    # Get current squad data
+    current_squad = ref.get() or []
+    # Add the new player data to the squad
+
+    # Check if current squad is 15 players
+    if len(current_squad) >= 15:
+        return {"message": "Squad is full. Cannot add more players."}
+
+    if player_data.in_bench:
+        # Check if there are already 4 players in the bench
+        bench_players = [
+            player for player in current_squad if player.get('in_bench')]
+        if len(bench_players) >= 4:
+            return {"message": "Bench is full. Cannot add more players to the bench."}
+
+    # Check if the player is already in the squad
+    if any(player['player_id'] == player_data.player_id for player in current_squad):
+        return {"message": "Player already in squad"}
+
+    current_squad.append(player_data.__dict__)
+
+    ref.set(current_squad)
+    return {"message": "Player added successfully"}
+
+
+@app.get("/remove_player/{player_id}")
+def remove_player(player_id: int):
+    ref = db.reference('squad')
+    current_squad = ref.get() or []
+    # Remove the player with the given player_id
+    updated_squad = [player for player in current_squad if player.get(
+        'player_id') != player_id]
+
+    if len(updated_squad) == len(current_squad):
+        return {"message": "Player not found in squad"}
+
+    ref.set(updated_squad)
+    return {"message": "Player removed successfully"}
+
+
+@app.delete("/clear_squad")
+def clear_squad():
+    ref = db.reference('squad')
+    ref.set([])  # Clear the squad by setting it to an empty list
+    return {"message": "Squad cleared successfully"}
+
+
+@app.get("/squad")
+def get_squad():
+    ref = db.reference('squad')
+    squad_data = ref.get()
+
+    return squad_data
 
 
 @https_fn.on_request()
@@ -225,19 +329,3 @@ def main(req: https_fn.Request) -> https_fn.Response:
 # if __name__ == "__main__":
     # config = get_config()
     # uvicorn.run(app, host=config.host, port=config.port)
-
-    # def shutdown(signum, frame):
-    #     print(f"Received signal {signum}")
-
-    #     app.stop()
-    #     sys.exit(0)
-
-    # signal.signal(signal.SIGTERM, shutdown)
-    # signal.signal(signal.SIGINT, shutdown)
-
-    # try:
-    #     app.start()
-    # except Exception as error:
-    #     print(f"Application failed to start: {error}")
-    #     app.stop()
-    #     raise
