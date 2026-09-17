@@ -149,7 +149,6 @@ def player_ranking():
     players.sort(key=lambda player: player.f_e_r, reverse=True)
 
     return {"message": players}
-
 # 1. Used by Firebase in Production
 
 
