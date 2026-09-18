@@ -21,7 +21,8 @@ async def setup_webhook():
     # Register the webhook URL with Telegram API
     success = await ptb_app.bot.set_webhook(
         url=f"{WEBHOOK_URL}/bot/webhook",
-        secret_token=SECRET_TOKEN
+        secret_token=SECRET_TOKEN,
+        max_connections=100,  # Example value, adjust as needed
     )
 
     return {
@@ -33,7 +34,7 @@ async def setup_webhook():
 @router.post("/webhook")
 async def telegram_webhook(request: Request):
     try:
-        # 1. Validate Secret Token
+        # 1. Validate Secret Token Header
         header_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
         if SECRET_TOKEN and header_secret != SECRET_TOKEN:
             return Response(status_code=status.HTTP_403_FORBIDDEN)
@@ -48,17 +49,18 @@ async def telegram_webhook(request: Request):
         # 4. Attempt processing with loop error recovery
         try:
             await ptb_app.process_update(update)
-        except RuntimeError as loop_err:
-            if "Event loop is closed" in str(loop_err):
-                logger.warning("Event loop was closed by runtime. Re-initializing PTB Application...")
+        except Exception as update_err:
+            # Catch loop death or stale transport issues
+            if "Event loop is closed" in str(update_err) or "NetworkError" in type(update_err).__name__:
+                logger.warning("Event loop closed/stale. Re-initializing PTB Application...")
                 await ptb_app.initialize()
                 await ptb_app.process_update(update)
             else:
-                raise loop_err
+                raise update_err
 
         return Response(status_code=status.HTTP_200_OK)
 
     except Exception as e:
         logger.error(f"Error handling update: {e}", exc_info=True)
-        # Always return 200 OK so Telegram doesn't endlessly retry failing requests
+        # Return 200 OK to prevent Telegram from spamming retries
         return Response(content="Internal error processed", status_code=status.HTTP_200_OK)
