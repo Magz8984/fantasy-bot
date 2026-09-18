@@ -1,3 +1,5 @@
-firebase_functions~=0.5.0
-fastapi
+firebase-functions
 firebase-admin
+fastapi
+requests
+anthropic
