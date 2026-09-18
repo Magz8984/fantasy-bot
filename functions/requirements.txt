@@ -3,3 +3,4 @@ firebase-admin
 fastapi
 requests
 anthropic
+python-telegram-bot

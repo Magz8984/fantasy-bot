@@ -66,6 +66,13 @@ firebase functions:secrets:access ANTHROPIC_API_KEY
 firebase functions:secrets:get ANTHROPIC_API_KEY
 ```
 
+## 7. Bot Setup 
+- Ensure Telegram can invoke your webhook
+
+```
+gcloud functions add-invoker-policy-binding main --region=us-central1 --member="allUsers"
+```
+
 > Note: there's no `firebase functions:secrets:list`. To see every secret in
 > the project, use `gcloud secrets list` or check
 > [Secret Manager in the Cloud Console](https://console.cloud.google.com/security/secret-manager).
